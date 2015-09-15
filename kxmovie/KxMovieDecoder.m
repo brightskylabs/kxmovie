@@ -50,7 +50,7 @@ static NSString * errorMessage (kxMovieError errorCode)
             return NSLocalizedString(@"Unable to open file", nil);
             
         case kxMovieErrorStreamInfoNotFound:
-            return NSLocalizedString(@"Unable to find stream information", nil);
+            return NSLocalizedString(@"Unable to fetch live preview", nil);
             
         case kxMovieErrorStreamNotFound:
             return NSLocalizedString(@"Unable to find stream", nil);
@@ -692,6 +692,7 @@ static int interrupt_callback(void *ctx);
 
 + (void)initialize
 {
+    av_log_set_level(AV_LOG_QUIET);
     av_log_set_callback(FFLog);
     av_register_all();
     avformat_network_init();
@@ -778,6 +779,8 @@ static int interrupt_callback(void *ctx);
         AVIOInterruptCB cb = {interrupt_callback, (__bridge void *)(self)};
         formatCtx->interrupt_callback = cb;
     }
+    
+    formatCtx->flags = formatCtx->flags | AVFMT_FLAG_NOBUFFER | AVFMT_FLAG_FLUSH_PACKETS;
     
     if (avformat_open_input(&formatCtx, [path cStringUsingEncoding: NSUTF8StringEncoding], NULL, NULL) < 0) {
         
@@ -964,11 +967,6 @@ static int interrupt_callback(void *ctx);
     
     _subtitleStream = subtitleStream;
     _subtitleCodecCtx = codecCtx;
-    
-    LoggerStream(1, @"subtitle codec: '%s' mode: %d enc: %s",
-                codecDesc->name,
-                codecCtx->sub_charenc_mode,
-                codecCtx->sub_charenc);
     
     _subtitleASSEvents = -1;
     
@@ -1438,20 +1436,7 @@ static int interrupt_callback(void *ctx);
                 }
                 
                 if (gotframe) {
-                    
-                    KxAudioFrame * frame = [self handleAudioFrame];
-                    if (frame) {
-                        
-                        [result addObject:frame];
-                                                
-                        if (_videoStream == -1) {
-                            
-                            _position = frame.position;
-                            decodedDuration += frame.duration;
-                            if (decodedDuration > minDuration)
-                                finished = YES;
-                        }
-                    }
+                    // GABE: removed audio frame decoding
                 }
                 
                 if (0 == len)
@@ -1624,25 +1609,6 @@ static int interrupt_callback(void *ctx)
 @end
 
 static void FFLog(void* context, int level, const char* format, va_list args) {
-    @autoreleasepool {
-        //Trim time at the beginning and new line at the end
-        NSString* message = [[NSString alloc] initWithFormat: [NSString stringWithUTF8String: format] arguments: args];
-        switch (level) {
-            case 0:
-            case 1:
-                LoggerStream(0, @"%@", [message stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
-                break;
-            case 2:
-                LoggerStream(1, @"%@", [message stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
-                break;
-            case 3:
-            case 4:
-                LoggerStream(2, @"%@", [message stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
-                break;
-            default:
-                LoggerStream(3, @"%@", [message stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
-                break;
-        }
-    }
+    // GABE - Removed all ffmpeg logging
 }
 

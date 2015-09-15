@@ -282,9 +282,11 @@ static void mat4f_LoadOrtho(float left, float right, float bottom, float top, fl
 {
     KxVideoFrameYUV *yuvFrame = (KxVideoFrameYUV *)frame;
     
-    assert(yuvFrame.luma.length == yuvFrame.width * yuvFrame.height);
-    assert(yuvFrame.chromaB.length == (yuvFrame.width * yuvFrame.height) / 4);
-    assert(yuvFrame.chromaR.length == (yuvFrame.width * yuvFrame.height) / 4);
+    if ((yuvFrame.luma.length != yuvFrame.width * yuvFrame.height) ||
+        (yuvFrame.chromaB.length != (yuvFrame.width * yuvFrame.height) / 4) ||
+        (yuvFrame.chromaR.length != (yuvFrame.width * yuvFrame.height) / 4)) {
+        return;
+    }
 
     const NSUInteger frameWidth = frame.width;
     const NSUInteger frameHeight = frame.height;    
@@ -490,10 +492,7 @@ enum {
 		
         LoggerVideo(0, @"failed to make complete framebuffer object %x", status);
         
-	} else {
-        
-        LoggerVideo(1, @"OK setup GL framebuffer %d:%d", _backingWidth, _backingHeight);
-    }
+	}
     
     [self updateVertices];
     [self render: nil];
@@ -583,7 +582,10 @@ exit:
 }
 
 - (void)render: (KxVideoFrame *) frame
-{        
+{
+    if ([[UIApplication sharedApplication] applicationState] != UIApplicationStateActive)
+        return;
+    
     static const GLfloat texCoords[] = {
         0.0f, 1.0f,
         1.0f, 1.0f,
@@ -595,7 +597,7 @@ exit:
     
     glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
     glViewport(0, 0, _backingWidth, _backingHeight);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 	glUseProgram(_program);
         

@@ -17,6 +17,7 @@
 #import "KxMovieGLView.h"
 #import "KxLogger.h"
 
+NSString * const KxMovieLoadingStateChangedNotification = @"KxMovieLoadingStateChangedNotification";
 NSString * const KxMovieParameterMinBufferedDuration = @"KxMovieParameterMinBufferedDuration";
 NSString * const KxMovieParameterMaxBufferedDuration = @"KxMovieParameterMaxBufferedDuration";
 NSString * const KxMovieParameterDisableDeinterlacing = @"KxMovieParameterDisableDeinterlacing";
@@ -110,7 +111,7 @@ static NSMutableDictionary * gHistory;
     UILabel             *_leftLabel;
     UIButton            *_infoButton;
     UITableView         *_tableView;
-    UIActivityIndicatorView *_activityIndicatorView;
+//    UIActivityIndicatorView *_activityIndicatorView; GABE
     UILabel             *_subtitlesLabel;
     
     UITapGestureRecognizer *_tapGestureRecognizer;
@@ -135,6 +136,7 @@ static NSMutableDictionary * gHistory;
 }
 
 @property (readwrite) BOOL playing;
+@property (readwrite) KxMovieLoadingState state;
 @property (readwrite) BOOL decoding;
 @property (readwrite, strong) KxArtworkFrame *artworkFrame;
 @end
@@ -153,8 +155,11 @@ static NSMutableDictionary * gHistory;
                                parameters: (NSDictionary *) parameters
 {    
     id<KxAudioManager> audioManager = [KxAudioManager audioManager];
-    [audioManager activateAudioSession];    
-    return [[KxMovieViewController alloc] initWithContentPath: path parameters: parameters];
+    [audioManager activateAudioSession];
+    NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:parameters];
+    dict[@"KxMovieParameterDecodeDuration"] = @(0.0f);
+    dict[@"KxMovieParameterMinBufferedDuration"] = @(0.0f);
+    return [[KxMovieViewController alloc] initWithContentPath: path parameters: dict];
 }
 
 - (id) initWithContentPath: (NSString *) path
@@ -179,6 +184,9 @@ static NSMutableDictionary * gHistory;
             __strong KxMovieViewController *strongSelf = weakSelf;
             return strongSelf ? [strongSelf interruptDecoder] : YES;
         };
+        
+        self.state = KxMovieLoading;
+        [[NSNotificationCenter defaultCenter] postNotificationName:KxMovieLoadingStateChangedNotification object:self];
         
         dispatch_async(dispatch_get_global_queue(0, 0), ^{
     
@@ -219,14 +227,8 @@ static NSMutableDictionary * gHistory;
     CGRect bounds = [[UIScreen mainScreen] applicationFrame];
     
     self.view = [[UIView alloc] initWithFrame:bounds];
-    self.view.backgroundColor = [UIColor blackColor];
+    self.view.backgroundColor = [UIColor clearColor];
     self.view.tintColor = [UIColor blackColor];
-
-    _activityIndicatorView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle: UIActivityIndicatorViewStyleWhiteLarge];
-    _activityIndicatorView.center = self.view.center;
-    _activityIndicatorView.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
-    
-    [self.view addSubview:_activityIndicatorView];
     
     CGFloat width = bounds.size.width;
     CGFloat height = bounds.size.height;
@@ -355,6 +357,11 @@ _messageLabel.hidden = YES;
         _leftLabel.hidden = YES;
         _infoButton.hidden = YES;
     }
+    
+    // GABE
+    _topBar.hidden = YES;
+    _topHUD.hidden = YES;
+    _bottomBar.hidden = YES;
 }
 
 - (void)didReceiveMemoryWarning
@@ -377,20 +384,14 @@ _messageLabel.hidden = YES;
             
             // force ffmpeg to free allocated memory
             [_decoder closeFile];
-            [_decoder openFile:nil error:nil];
-            
-            [[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Failure", nil)
-                                        message:NSLocalizedString(@"Out of memory", nil)
-                                       delegate:nil
-                              cancelButtonTitle:NSLocalizedString(@"Close", nil)
-                              otherButtonTitles:nil] show];
+//            [_decoder openFile:nil error:nil]; // GABE
         }
         
     } else {
         
         [self freeBufferedFrames];
         [_decoder closeFile];
-        [_decoder openFile:nil error:nil];
+//        [_decoder openFile:nil error:nil]; // GABE
     }
 }
 
@@ -416,13 +417,16 @@ _messageLabel.hidden = YES;
         
     } else {
 
-        [_activityIndicatorView startAnimating];
     }
    
         
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(applicationWillResignActive:)
                                                  name:UIApplicationWillResignActiveNotification
+                                               object:[UIApplication sharedApplication]];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(applicationDidBecomeActive:)
+                                                 name:UIApplicationDidBecomeActiveNotification
                                                object:[UIApplication sharedApplication]];
 }
 
@@ -431,9 +435,7 @@ _messageLabel.hidden = YES;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     
     [super viewWillDisappear:animated];
-    
-    [_activityIndicatorView stopAnimating];
-    
+
     if (_decoder) {
         
         [self pause];
@@ -450,9 +452,8 @@ _messageLabel.hidden = YES;
         
     [[UIApplication sharedApplication] setIdleTimerDisabled:_savedIdleTimer];
     
-    [_activityIndicatorView stopAnimating];
     _buffered = NO;
-    _interrupted = YES;
+//    _interrupted = YES; GABE
     
     LoggerStream(1, @"viewWillDisappear %@", self);
 }
@@ -468,6 +469,13 @@ _messageLabel.hidden = YES;
     [self pause];
     
     LoggerStream(1, @"applicationWillResignActive");
+}
+
+- (void) applicationDidBecomeActive: (NSNotification *)notification
+{
+    [self play];
+    
+    LoggerStream(1, @"applicationDidBecomeActive");
 }
 
 #pragma mark - gesture recognizer
@@ -681,21 +689,21 @@ _messageLabel.hidden = YES;
             _leftLabel.hidden       = NO;
             _infoButton.hidden      = NO;
             
-            if (_activityIndicatorView.isAnimating) {
-                
-                [_activityIndicatorView stopAnimating];
-                // if (self.view.window)
-                [self restorePlay];
-            }
+            [self restorePlay];
         }
+        
+        self.state = KxMoviePlaying;
+        [[NSNotificationCenter defaultCenter] postNotificationName:KxMovieLoadingStateChangedNotification object:self];
         
     } else {
         
          if (self.isViewLoaded && self.view.window) {
         
-             [_activityIndicatorView stopAnimating];
-             if (!_interrupted)
+             if (!_interrupted) {
                  [self handleDecoderMovieError: error];
+                 self.state = KxMovieError;
+                 [[NSNotificationCenter defaultCenter] postNotificationName:KxMovieLoadingStateChangedNotification object:self];
+             }
          }
     }
 }
@@ -849,7 +857,7 @@ _messageLabel.hidden = YES;
                                 
                                 memset(outData, 0, numFrames * numChannels * sizeof(float));
 #ifdef DEBUG
-                                LoggerStream(0, @"desync audio (outrun) wait %.4f %.4f", _moviePosition, frame.position);
+//                                LoggerStream(0, @"desync audio (outrun) wait %.4f %.4f", _moviePosition, frame.position);
                                 _debugAudioStatus = 1;
                                 _debugAudioStatusTS = [NSDate date];
 #endif
@@ -861,7 +869,7 @@ _messageLabel.hidden = YES;
                             if (delta > 0.1 && count > 1) {
                                 
 #ifdef DEBUG
-                                LoggerStream(0, @"desync audio (lags) skip %.4f %.4f", _moviePosition, frame.position);
+//                                LoggerStream(0, @"desync audio (lags) skip %.4f %.4f", _moviePosition, frame.position);
                                 _debugAudioStatus = 2;
                                 _debugAudioStatusTS = [NSDate date];
 #endif
@@ -1057,7 +1065,6 @@ _messageLabel.hidden = YES;
         
         _tickCorrectionTime = 0;
         _buffered = NO;
-        [_activityIndicatorView stopAnimating];        
     }
     
     CGFloat interval = 0;
@@ -1082,7 +1089,6 @@ _messageLabel.hidden = YES;
             if (_minBufferedDuration > 0 && !_buffered) {
                                 
                 _buffered = YES;
-                [_activityIndicatorView startAnimating];
             }
         }
         
@@ -1305,39 +1311,41 @@ _messageLabel.hidden = YES;
     if (_decoder.duration != MAXFLOAT)
         _leftLabel.text = formatTimeInterval(duration - position, YES);
 
-#ifdef DEBUG
-    const NSTimeInterval timeSinceStart = [NSDate timeIntervalSinceReferenceDate] - _debugStartTime;
-    NSString *subinfo = _decoder.validSubtitles ? [NSString stringWithFormat: @" %d",_subtitles.count] : @"";
-    
-    NSString *audioStatus;
-    
-    if (_debugAudioStatus) {
-        
-        if (NSOrderedAscending == [_debugAudioStatusTS compare: [NSDate dateWithTimeIntervalSinceNow:-0.5]]) {
-            _debugAudioStatus = 0;
-        }
-    }
-    
-    if      (_debugAudioStatus == 1) audioStatus = @"\n(audio outrun)";
-    else if (_debugAudioStatus == 2) audioStatus = @"\n(audio lags)";
-    else if (_debugAudioStatus == 3) audioStatus = @"\n(audio silence)";
-    else audioStatus = @"";
-
-    _messageLabel.text = [NSString stringWithFormat:@"%d %d%@ %c - %@ %@ %@\n%@",
-                          _videoFrames.count,
-                          _audioFrames.count,
-                          subinfo,
-                          self.decoding ? 'D' : ' ',
-                          formatTimeInterval(timeSinceStart, NO),
-                          //timeSinceStart > _moviePosition + 0.5 ? @" (lags)" : @"",
-                          _decoder.isEOF ? @"- END" : @"",
-                          audioStatus,
-                          _buffered ? [NSString stringWithFormat:@"buffering %.1f%%", _bufferedDuration / _minBufferedDuration * 100] : @""];
-#endif
+//#ifdef DEBUG GABE
+//    const NSTimeInterval timeSinceStart = [NSDate timeIntervalSinceReferenceDate] - _debugStartTime;
+//    NSString *subinfo = _decoder.validSubtitles ? [NSString stringWithFormat: @" %d",_subtitles.count] : @"";
+//    
+//    NSString *audioStatus;
+//    
+//    if (_debugAudioStatus) {
+//        
+//        if (NSOrderedAscending == [_debugAudioStatusTS compare: [NSDate dateWithTimeIntervalSinceNow:-0.5]]) {
+//            _debugAudioStatus = 0;
+//        }
+//    }
+//    
+//    if      (_debugAudioStatus == 1) audioStatus = @"\n(audio outrun)";
+//    else if (_debugAudioStatus == 2) audioStatus = @"\n(audio lags)";
+//    else if (_debugAudioStatus == 3) audioStatus = @"\n(audio silence)";
+//    else audioStatus = @"";
+//
+//    _messageLabel.text = [NSString stringWithFormat:@"%d %d%@ %c - %@ %@ %@\n%@",
+//                          _videoFrames.count,
+//                          _audioFrames.count,
+//                          subinfo,
+//                          self.decoding ? 'D' : ' ',
+//                          formatTimeInterval(timeSinceStart, NO),
+//                          //timeSinceStart > _moviePosition + 0.5 ? @" (lags)" : @"",
+//                          _decoder.isEOF ? @"- END" : @"",
+//                          audioStatus,
+//                          _buffered ? [NSString stringWithFormat:@"buffering %.1f%%", _bufferedDuration / _minBufferedDuration * 100] : @""];
+//#endif
 }
 
 - (void) showHUD: (BOOL) show
 {
+    return; // GABE
+    
     _hiddenHUD = !show;    
     _panGestureRecognizer.enabled = _hiddenHUD;
         
@@ -1531,13 +1539,7 @@ _messageLabel.hidden = YES;
 
 - (void) handleDecoderMovieError: (NSError *) error
 {
-    UIAlertView *alertView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Failure", nil)
-                                                        message:[error localizedDescription]
-                                                       delegate:nil
-                                              cancelButtonTitle:NSLocalizedString(@"Close", nil)
-                                              otherButtonTitles:nil];
-    
-    [alertView show];
+
 }
 
 - (BOOL) interruptDecoder

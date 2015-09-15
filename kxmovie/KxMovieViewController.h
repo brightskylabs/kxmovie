@@ -11,6 +11,14 @@
 
 #import <UIKit/UIKit.h>
 
+FOUNDATION_EXPORT NSString * const KxMovieLoadingStateChangedNotification;
+
+typedef NS_ENUM(NSUInteger, KxMovieLoadingState) {
+    KxMovieLoading,
+    KxMoviePlaying,
+    KxMovieError,
+};
+
 @class KxMovieDecoder;
 
 extern NSString * const KxMovieParameterMinBufferedDuration;    // Float
@@ -23,6 +31,7 @@ extern NSString * const KxMovieParameterDisableDeinterlacing;   // BOOL
                                parameters: (NSDictionary *) parameters;
 
 @property (readonly) BOOL playing;
+@property (readonly, nonatomic) KxMovieLoadingState state;
 
 - (void) play;
 - (void) pause;
