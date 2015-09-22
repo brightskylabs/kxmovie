@@ -21,4 +21,6 @@
 
 - (void) render: (KxVideoFrame *) frame;
 
+@property (nonatomic) UIImage *lastVideoFrame;
+
 @end

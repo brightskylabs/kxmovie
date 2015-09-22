@@ -32,8 +32,11 @@ extern NSString * const KxMovieParameterDisableDeinterlacing;   // BOOL
 
 @property (readonly) BOOL playing;
 @property (readonly, nonatomic) KxMovieLoadingState state;
+@property (readonly, nonatomic) NSError *error;
 
 - (void) play;
 - (void) pause;
+
+@property (readonly) UIImage *lastFrame;
 
 @end
