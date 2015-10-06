@@ -131,7 +131,8 @@ static NSMutableDictionary * gHistory;
     BOOL                _buffered;
     
     BOOL                _savedIdleTimer;
-    
+
+    NSString *_path;
     NSDictionary        *_parameters;
 }
 
@@ -139,6 +140,8 @@ static NSMutableDictionary * gHistory;
 @property (readwrite) KxMovieLoadingState state;
 @property (readwrite) BOOL decoding;
 @property (readwrite, strong) KxArtworkFrame *artworkFrame;
+@property (nonatomic) BOOL settingUpDecoder;
+@property (readwrite) NSError *error;
 @end
 
 @implementation KxMovieViewController
@@ -157,8 +160,7 @@ static NSMutableDictionary * gHistory;
     id<KxAudioManager> audioManager = [KxAudioManager audioManager];
     [audioManager activateAudioSession];
     NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:parameters];
-    dict[@"KxMovieParameterDecodeDuration"] = @(0.0f);
-    dict[@"KxMovieParameterMinBufferedDuration"] = @(0.0f);
+    dict[KxMovieParameterMinBufferedDuration] = @(0.0);
     return [[KxMovieViewController alloc] initWithContentPath: path parameters: dict];
 }
 
@@ -173,37 +175,48 @@ static NSMutableDictionary * gHistory;
         _moviePosition = 0;
 //        self.wantsFullScreenLayout = YES;
 
+        _path = path;
         _parameters = parameters;
-        
-        __weak KxMovieViewController *weakSelf = self;
-        
-        KxMovieDecoder *decoder = [[KxMovieDecoder alloc] init];
-        
-        decoder.interruptCallback = ^BOOL(){
-            
-            __strong KxMovieViewController *strongSelf = weakSelf;
-            return strongSelf ? [strongSelf interruptDecoder] : YES;
-        };
-        
-        self.state = KxMovieLoading;
-        [[NSNotificationCenter defaultCenter] postNotificationName:KxMovieLoadingStateChangedNotification object:self];
-        
-        dispatch_async(dispatch_get_global_queue(0, 0), ^{
-    
-            NSError *error = nil;
-            [decoder openFile:path error:&error];
-                        
-            __strong KxMovieViewController *strongSelf = weakSelf;
-            if (strongSelf) {
-                
-                dispatch_sync(dispatch_get_main_queue(), ^{
-                    
-                    [strongSelf setMovieDecoder:decoder withError:error];                    
-                });
-            }
-        });
+        [self setupDecoder];
     }
     return self;
+}
+
+- (void)setupDecoder {
+    if (self.settingUpDecoder) {
+        return;
+    }
+    
+    self.settingUpDecoder = YES;
+    
+    __weak KxMovieViewController *weakSelf = self;
+    
+    KxMovieDecoder *decoder = [[KxMovieDecoder alloc] init];
+    
+    decoder.interruptCallback = ^BOOL(){
+        
+        __strong KxMovieViewController *strongSelf = weakSelf;
+        return strongSelf ? [strongSelf interruptDecoder] : YES;
+    };
+    
+    self.state = KxMovieLoading;
+    [[NSNotificationCenter defaultCenter] postNotificationName:KxMovieLoadingStateChangedNotification object:self];
+    
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        
+        NSError *error = nil;
+        [decoder openFile:_path error:&error];
+        __strong KxMovieViewController *strongSelf = weakSelf;
+        if (strongSelf) {
+            
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                
+                [strongSelf setMovieDecoder:decoder withError:error];
+                strongSelf.settingUpDecoder = NO;
+                
+            });
+        }
+    });
 }
 
 - (void) dealloc
@@ -438,7 +451,7 @@ _messageLabel.hidden = YES;
 
     if (_decoder) {
         
-        [self pause];
+//        [self pause];
         
         if (_moviePosition == 0 || _decoder.isEOF)
             [gHistory removeObjectForKey:_decoder.path];
@@ -527,7 +540,7 @@ _messageLabel.hidden = YES;
     
     if (!_decoder.validVideo &&
         !_decoder.validAudio) {
-        
+        [self setupDecoder];
         return;
     }
     
@@ -585,6 +598,10 @@ _messageLabel.hidden = YES;
     });
 }
 
+- (UIImage *)lastFrame {
+    return _glView.lastVideoFrame;
+}
+
 #pragma mark - actions
 
 - (void) doneDidTouch: (id) sender
@@ -631,8 +648,9 @@ _messageLabel.hidden = YES;
                withError: (NSError *) error
 {
     LoggerStream(2, @"setMovieDecoder");
+    self.error = error;
             
-    if (!error && decoder) {
+    if (!error && decoder && decoder.validVideo) {
         
         _decoder        = decoder;
         _dispatchQueue  = dispatch_queue_create("KxMovie", DISPATCH_QUEUE_SERIAL);
@@ -697,14 +715,14 @@ _messageLabel.hidden = YES;
         
     } else {
         
-         if (self.isViewLoaded && self.view.window) {
+//         if (self.isViewLoaded && self.view.window) {
         
              if (!_interrupted) {
                  [self handleDecoderMovieError: error];
                  self.state = KxMovieError;
                  [[NSNotificationCenter defaultCenter] postNotificationName:KxMovieLoadingStateChangedNotification object:self];
              }
-         }
+//         }
     }
 }
 
